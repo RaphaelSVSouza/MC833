@@ -1,0 +1,18 @@
+# Ignora tudo
+*
+
+# Mantém o próprio .gitignore
+!.gitignore
+
+# Mantém o script solicitado
+!copy-files.sh
+
+# Mantém as pastas solicitadas e todo conteúdo delas
+!cliente/
+!cliente/**
+
+!servidor/
+!servidor/**
+
+!roteador/
+!roteador/**
