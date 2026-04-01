@@ -9,6 +9,7 @@
 
 # Mantém as pastas solicitadas e todo conteúdo delas
 !cliente/cliente.py
+!README.md
 
 !servidor/
 !servidor/**
