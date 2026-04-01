@@ -8,11 +8,18 @@
 !copy-files.sh
 
 # Mantém as pastas solicitadas e todo conteúdo delas
-!cliente/
-!cliente/**
+!cliente/cliente.py
 
 !servidor/
 !servidor/**
 
 !roteador/
 !roteador/**
+
+!Dockerfile
+!docker-compose.yml
+!lab.sh
+
+# trabalhos
+!relatorios/
+!trabalhos/**

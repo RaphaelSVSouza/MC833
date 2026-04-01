@@ -11,7 +11,7 @@ SRC_PORT = 9999
 # --- FUNÇÕES AUXILIARES PARA DESMONTAR PACOTES ---
 def unpack_iph(pkg: bytes):
     """Extrai os 20 bytes do cabeçalho IP e retorna uma tupla."""
-    # Lembre-se: pkg já deve vir sem os 14 bytes do Ethernet!
+    # pkg já deve vir sem os 14 bytes do Ethernet!
     return struct.unpack('!BBHHHBBH4s4s', pkg[0:20])
 
 def unpack_udp(pkg: bytes):
@@ -45,7 +45,6 @@ def build_ip_header(src_ip: str, dest_ip: str, total_length: int) -> bytes:
     src_ip_bin = socket.inet_aton(src_ip)
     dest_ip_bin = socket.inet_aton(dest_ip)
 
-    # Monta sem checksum para calcular
     ip_header_wo_checksum = struct.pack(
         '!BBHHHBBH4s4s', 
         version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, 0, src_ip_bin, dest_ip_bin
@@ -53,7 +52,6 @@ def build_ip_header(src_ip: str, dest_ip: str, total_length: int) -> bytes:
     
     ip_checksum = calculate_checksum(ip_header_wo_checksum)
     
-    # Monta a versão final com o checksum calculado
     ip_header = struct.pack(
         '!BBHHHBBH4s4s', 
         version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, ip_checksum, src_ip_bin, dest_ip_bin
@@ -67,35 +65,25 @@ def build_udp_header(src_ip: str, dest_ip: str, src_port: int, dest_port: int, p
     src_ip_bin = socket.inet_aton(src_ip)
     dest_ip_bin = socket.inet_aton(dest_ip)
     protocol = socket.IPPROTO_UDP
-
-    # Monta o header UDP sem checksum
     udp_header_wo_checksum = struct.pack('!HHHH', src_port, dest_port, udp_length, 0)
     
     # Monta o Pseudo-Header exigido pela RFC 768 para calcular o checksum do UDP
     pseudo_header = struct.pack('!4s4sBBH', src_ip_bin, dest_ip_bin, 0, protocol, udp_length)
     
-    # A grande soma: Pseudo-Header + Header UDP Zerado + Dados
     udp_checksum = calculate_checksum(pseudo_header + udp_header_wo_checksum + payload)
     udp_checksum = 0xFFFF if udp_checksum == 0 else udp_checksum
-    
-    # Retorna os 8 bytes finais
     udp_header = struct.pack('!HHHH', src_port, dest_port, udp_length, udp_checksum)
     
     return udp_header
 
 def build_udp_packet(src_ip: str, dest_ip: str, src_port: int, dest_port: int, data) -> bytes:
     """Orquestra a montagem do pacote completo: IP + UDP + Payload."""
-    # Garante que os dados estão em formato de bytes
     payload = data if isinstance(data, bytes) else data.encode('utf-8')
-    
-    # 1. Constrói o UDP
     udp_header = build_udp_header(src_ip, dest_ip, src_port, dest_port, payload)
-    
-    # 2. Constrói o IP (Lembrando que o tamanho total = 20 (IP) + 8 (UDP) + Payload)
     total_length = 20 + 8 + len(payload)
     ip_header = build_ip_header(src_ip, dest_ip, total_length)
     
-    # 3. Encapsula tudo (Boneca Russa)
+    # Encapsula tudo - Boneca Russa)
     pacote_completo = ip_header + udp_header + payload
     
     return pacote_completo
@@ -120,20 +108,17 @@ def processar_comandos():
     while True:
         raw_data, _ = sniffer.recvfrom(65535)
         
-        # Filtro básico de tamanho e protocolo Ethernet (apenas IPv4)
+        # Filtr básico de tamanho e protocolo IPV4
         if len(raw_data) < 42: continue
         if struct.unpack('!H', raw_data[12:14])[0] != 0x0800: continue
         
-        # Pula a Camada 2 (Ethernet)
         ip_packet = raw_data[14:]
         
-        # --- 1. PROCESSA O CABEÇALHO IP ---
         iph = unpack_iph(ip_packet)
         protocolo_ip = iph[6]
         
         if protocolo_ip != 17: continue # Se não for UDP (17), ignora
         
-        # --- 2. PROCESSA O CABEÇALHO UDP ---
         udph = unpack_udp(ip_packet)
         src_port_client = udph[0]
         dst_port_serv = udph[1]
@@ -143,7 +128,7 @@ def processar_comandos():
             # O IP de origem está no índice 8 da tupla do unpack_iph
             src_ip_client = socket.inet_ntoa(iph[8]) 
             
-            # Pega o payload (a mensagem) usando a nossa nova função
+            # Pega o payload usando a nossa nova função
             payload = unpack_data(ip_packet)
             mensagem = payload.decode('utf-8', errors='ignore').strip()
             

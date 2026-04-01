@@ -22,7 +22,7 @@ def calculate_checksum(data: bytes) -> int:
     return (~checksum_sum) & 0xFFFF
 
 def build_ip_header(src_ip: str, dest_ip: str, total_length: int) -> bytes:
-    """Constrói o cabeçalho IPv4 e calcula seu próprio checksum."""
+    """Constrói o cabeçalho IPv4 (20 bytes) e calcula seu checksum."""
     version_ihl = (4 << 4) | 5
     tos = 0
     identification = 0x1234
@@ -32,31 +32,48 @@ def build_ip_header(src_ip: str, dest_ip: str, total_length: int) -> bytes:
     src_ip_bin = socket.inet_aton(src_ip)
     dest_ip_bin = socket.inet_aton(dest_ip)
 
-    ip_header_wo_checksum = struct.pack('!BBHHHBBH4s4s', version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, 0, src_ip_bin, dest_ip_bin)
+    ip_header_wo_checksum = struct.pack(
+        '!BBHHHBBH4s4s', 
+        version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, 0, src_ip_bin, dest_ip_bin
+    )
+    
     ip_checksum = calculate_checksum(ip_header_wo_checksum)
-    return struct.pack('!BBHHHBBH4s4s', version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, ip_checksum, src_ip_bin, dest_ip_bin)
+    
+    ip_header = struct.pack(
+        '!BBHHHBBH4s4s', 
+        version_ihl, tos, total_length, identification, flags_frag, ttl, protocol, ip_checksum, src_ip_bin, dest_ip_bin
+    )
+    
+    return ip_header
 
 def build_udp_header(src_ip: str, dest_ip: str, src_port: int, dest_port: int, payload: bytes) -> bytes:
-    """Constrói o cabeçalho UDP calculando o checksum com o pseudo-header."""
+    """Constrói o cabeçalho UDP (8 bytes) calculando o checksum com o pseudo-header IP."""
     udp_length = 8 + len(payload)
     src_ip_bin = socket.inet_aton(src_ip)
     dest_ip_bin = socket.inet_aton(dest_ip)
     protocol = socket.IPPROTO_UDP
-
     udp_header_wo_checksum = struct.pack('!HHHH', src_port, dest_port, udp_length, 0)
+    
+    # Monta o Pseudo-Header exigido pela RFC 768 para calcular o checksum do UDP
     pseudo_header = struct.pack('!4s4sBBH', src_ip_bin, dest_ip_bin, 0, protocol, udp_length)
     
     udp_checksum = calculate_checksum(pseudo_header + udp_header_wo_checksum + payload)
     udp_checksum = 0xFFFF if udp_checksum == 0 else udp_checksum
-    return struct.pack('!HHHH', src_port, dest_port, udp_length, udp_checksum)
+    udp_header = struct.pack('!HHHH', src_port, dest_port, udp_length, udp_checksum)
+    
+    return udp_header
 
-def build_udp_packet(src_ip, dest_ip, src_port, dest_port, data) -> bytes:
-    """Orquestra a montagem do pacote completo."""
+def build_udp_packet(src_ip: str, dest_ip: str, src_port: int, dest_port: int, data) -> bytes:
+    """Orquestra a montagem do pacote completo: IP + UDP + Payload."""
     payload = data if isinstance(data, bytes) else data.encode('utf-8')
     udp_header = build_udp_header(src_ip, dest_ip, src_port, dest_port, payload)
     total_length = 20 + 8 + len(payload)
     ip_header = build_ip_header(src_ip, dest_ip, total_length)
-    return ip_header + udp_header + payload
+    
+    # Encapsula tudo - Boneca Russa)
+    pacote_completo = ip_header + udp_header + payload
+    
+    return pacote_completo
 
 # --- FUNÇÕES DE EXTRACAO DE PACOTES ---
 def unpack_iph(pkg: bytes):
@@ -75,18 +92,17 @@ def unpack_data(pkg: bytes):
 
 def unpack_rtp(rtp_bytes: bytes):
     """Extrai o cabeçalho RTP de 12 bytes"""
-    # Desempacota os 12 bytes (!BBHII)
     v_p_x_cc, m_pt, seq_num, timestamp, ssrc = struct.unpack('!BBHII', rtp_bytes[:12])
     return seq_num, timestamp, ssrc
 
 # --- LÓGICA DO CLIENTE ---
 
 def iniciar_cliente():
-    # Socket para ENVIAR (Camada 3)
+    # Socket para ENVIAR
     sender = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
     sender.setsockopt(socket.IPPROTO_IP, socket.IP_HDRINCL, 1)
     
-    # Socket para ESCUTAR (Camada 2)
+    # Socket para ESCUTAR
     sniffer = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     sniffer.bind((INTERFACE, 0))
     
@@ -131,7 +147,6 @@ def receber_catalogo(sniffer):
 def receber_stream(sniffer, nome_video):
     arquivo_saida = f"saida-{nome_video}"
     
-    # Apaga streams antigos para economizar espaço
     for antigo in glob.glob("saida-*.ts"):
         if antigo != arquivo_saida:
             os.remove(antigo)
@@ -139,7 +154,7 @@ def receber_stream(sniffer, nome_video):
     
     print(f"Recebendo stream... Salvo em '{arquivo_saida}'. (Ctrl+C para parar)")
     
-    # Timeout de 3s significa fim do stream
+    # Timeout de 3s para sinalizar fim da steam
     sniffer.settimeout(3.0) 
     
     try:
@@ -159,17 +174,14 @@ def receber_stream(sniffer, nome_video):
                     if udph[1] == SRC_PORT:
                         payload_udp = unpack_data(ip_packet)
                         
-                        # 1. Isola os 12 bytes do RTP
                         rtp_header = payload_udp[:12]
                         
-                        # 2. Desempacota e lê os valores!
                         seq_num, timestamp, ssrc = unpack_rtp(rtp_header)
                         
-                        # OPCIONAL: Você pode imprimir a cada 100 pacotes só pra ver a mágica acontecendo
+                        # log para cada 100 pacotes recebidos
                         if seq_num % 100 == 0:
                             print(f"[*] Recebido Pacote RTP -> Seq: {seq_num} | Timestamp: {timestamp}")
                         
-                        # 3. Agora sim, pega do byte 12 em diante (o vídeo real) e salva
                         payload_video = payload_udp[12:] 
                         f.write(payload_video)
                         
