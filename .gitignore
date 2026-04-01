@@ -21,6 +21,6 @@
 !docker-compose.yml
 !lab.sh
 
-# trabalhos
+# adiciona os relatórios em pasta
 !relatorios/
-!trabalhos/**
+!relatorios/**
